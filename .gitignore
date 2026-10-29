@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+# produced by the pipeline, never committed
+model/
+metrics.json
+test-results.xml

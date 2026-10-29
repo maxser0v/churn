@@ -1,0 +1,81 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt pyyaml
+      - name: Lint
+        run: ruff check .
+      - name: Validate data
+        run: python ci/validate_data.py data/churn.csv
+      - name: Train
+        run: python train.py --data data/churn.csv --out model
+      - name: Quality gate
+        run: python ci/quality_gate.py
+      - name: Tests
+        run: python -m pytest -q
+      - uses: actions/upload-artifact@v6
+        if: matrix.python-version == '3.11'
+        with:
+          name: model
+          path: |
+            model/
+            metrics.json
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+      - name: Build image
+        run: docker build -t churn-api:ci .
+      - name: Start image
+        run: |
+          docker run -d --name churn-api -p 8000:8000 churn-api:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs churn-api
+          exit 1
+      - name: Smoke test
+        run: python ci/smoke_test.py http://localhost:8000
+      - name: Publish image
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA:0:7}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag churn-api:ci "$IMAGE"
+          docker push "$IMAGE"
+      - name: Cleanup
+        if: always()
+        run: docker rm -f churn-api || true
