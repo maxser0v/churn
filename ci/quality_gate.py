@@ -3,7 +3,7 @@ import json
 import sys
 
 # Measured in 13e: clean recall .754, shuffled .497; F1 noise half-width .047.
-MIN_TEST_RECALL = 0.65
+MIN_TEST_RECALL = 0.95
 MIN_TEST_PRECISION = 0.25
 F1_TOLERANCE = 0.06
 MIN_SLICE_RECALL = {"month_to_month": 0.75, "long_contract": 0.15}
